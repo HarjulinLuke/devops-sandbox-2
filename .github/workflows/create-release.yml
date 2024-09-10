@@ -150,7 +150,7 @@ jobs:
         write-output $tagBody >> "tagBody.txt"
         
     - name: Publish Artifact
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: tag-body
         path: tagBody.txt
@@ -202,7 +202,7 @@ jobs:
         fetch-depth: 0
 
     - name: Download Tag Body Artifact
-      uses: actions/download-artifact@v2
+      uses: actions/download-artifact@v4
       with:
         name: tag-body
         path: tagBody
