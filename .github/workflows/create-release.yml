@@ -1,0 +1,242 @@
+name: 'Create/Update Release'
+run-name: 'Push to release branch ${{ github.ref_name }}'
+
+on:
+  push:
+    branches:
+    - release/*
+
+permissions:
+  id-token: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  FetchNewVersionsAndElements:
+    name: 'Fetch Release Version And Changed Files'
+    runs-on: ubuntu-latest
+    outputs:
+      newReleaseVersion: ${{ steps.get-release-tag.outputs.newReleaseVersion }}
+      elementsChanged: ${{ steps.elements-changed-output.outputs.elementsChanged }}
+      elementsTags: ${{ steps.get-associated-tags.outputs.elementsTags }}
+      parentIsHotfix: ${{ steps.get-parent-branch.outputs.parentIsHotfix }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get Parent Branch
+      id: get-parent-branch
+      shell: pwsh
+      run: |
+        git fetch -v
+        git checkout main
+        git checkout ${{ github.ref_name }}
+        $parentIsHotfix = (git rev-list --count ${{ github.event.repository.default_branch }}..HEAD) -gt 0
+        Write-Output "Create New Element Tags: $parentIsHotfix"
+        "parentIsHotfix=$parentIsHotfix" >> $env:GITHUB_OUTPUT
+
+    - name: Output elements to run CI for
+      id: elements-changed-output
+      uses: ./.github/actions/get-changed-elements
+      with:
+        changed-files-config: 'changed-files-config.json'
+        
+    - name: 'Get next release version'
+      id: get-release-tag
+      shell: pwsh
+      run: |
+        git fetch --tags
+        $currentBranch = git rev-parse --abbrev-ref HEAD
+        $releaseBranchVersion = ($currentBranch -split '/' | Select-Object -Last 1) -replace "v",""
+        $tags = git tag
+
+        # Check for a match
+        $matches = ($tags -match "^[vV]?$releaseBranchVersion([.][0-9]+)?$") -replace "v",""
+        $matchFound = $matches.Count -gt 0
+
+        # Output result
+        if ($matchFound) {
+          Write-Output "A tag matching the release version $releaseBranchVersion was found."
+          # Get most recent tag for release
+          $latestTag = $matches | Sort-Object -Descending | Select-Object -First 1
+          $major,$minor,$patch = $latestTag.Split('.')
+          [int]$patch+=1
+          Write-Output "A new release will be created with a bump to the patch. New version: $major.$minor.$patch"
+          "newReleaseVersion=$major.$minor.$patch" >> $env:GITHUB_OUTPUT
+        }
+        else {
+          Write-Output "No matching tag found for $releaseBranchVersion. Creating a new release for release branch..."
+          $newTag = ""
+          if ("$releaseBranchVersion" -match "^[0-9]+[.][0-9]+[.][0-9]+$") {
+            $newTag = "$releaseBranchVersion"
+          }
+          elseif ("$releaseBranchVersion" -match "^[0-9]+[.][0-9]+$") {
+            $newTag = "$releaseBranchVersion.0"
+          }
+          elseif ("$releaseBranchVersion" -match "^[0-9]+$") {
+            $newTag = "$releaseBranchVersion.0.0"
+          }
+          else {
+            Write-Error "Invalid version format. Please use the format Major.Minor.Patch"
+            exit 1
+          }
+          "newReleaseVersion=$newTag" >> $env:GITHUB_OUTPUT
+        }
+
+    - name: Get tags of elements
+      id: get-associated-tags
+      shell: pwsh
+      run: |
+        $tagBody = "### Contents: `r`n"
+        $elements = Get-Content changed-files-config.json | ConvertFrom-Json | Select-Object -ExpandProperty elements
+        $elementsChanged = '${{ steps.elements-changed-output.outputs.elementsChanged }}' | ConvertFrom-Json
+        $elementsTags = @()
+        foreach ($element in $elements) {
+          Write-Output "Element: $($element.name)"
+          $latestCommit = ""
+          foreach ($path in $element.path) {
+            Write-Output "  Path: $path"
+            $commitHash = git log --before="$(git log -n 1 --pretty=format:'%cI')" -n 1 --pretty=format:"%H" -- $path
+            if ($commitHash -eq (git rev-parse HEAD)) {
+              if (git tag --points-at $commitHash | Select-String "$($element.name)-v*") {
+                Write-Output "Head points to a tag for $($element.name)"
+                $latestCommit = $commitHash
+                break
+              }
+              else {
+                # If the commit hash is the same as the HEAD and a tag doesn't exist for the element,
+                # then the file was modified in the last commit and needs a tag
+                # So we need to get the second latest commit to get the latest tag
+                $latestCommit = (git log --before="$(git log -n 1 --pretty=format:'%cI')" -n 2 --pretty=format:"%H" -- $path)[1]
+              }              
+            }
+            else {
+              # $childCommit = git log --all --pretty=format:'%H %P' | Select-String " $commitHash" | ForEach-Object { $_.ToString().Split(' ')[0] }
+              if ($latestCommit) {
+                git merge-base --is-ancestor $latestCommit $commitHash
+                if ($LASTEXITCODE -eq 0) {
+                  $latestCommit = $commitHash
+                }
+              }
+              else {
+                $latestCommit = $commitHash
+              }
+            }
+          }
+          $tag = (git tag --points-at $latestCommit | Select-String "$($element.name)-v*").Line
+          Write-Output "Tag: $tag"
+          $tagWithoutPrefix = $tag -replace "$($element.name)-v",""
+          if ($elementsChanged -contains $element.name -and '${{ steps.get-parent-branch.outputs.parentIsHotfix }}' -eq 'true') {
+            $major,$minor,$patch = ($tag -replace "$($element.name)-v","").Split('.')
+            [int]$patch+=1
+            $tag = "$($element.name)-v$major.$minor.$patch"
+            $tagWithoutPrefix = "$major.$minor.$patch"
+            $latestCommit = "${{ github.sha }}"
+          }
+          $elementsTags += @{
+            name = $element.name
+            tag = $tag
+            tagWithoutPrefix = $tagWithoutPrefix
+            commit = $latestCommit
+          }
+          $tagBody += "#### Element: $($element.name) `r`n"
+          $tagBody += " Latest Tag: $tag `r`n"
+          $tagBody += " Latest Commit: $latestCommit `r`n`r`n"
+        }
+        Write-Output ($elementsTags | ConvertTo-Json)
+        "elementsTags=$($elementsTags | ConvertTo-Json -Compress)" >> $env:GITHUB_OUTPUT
+        write-output $tagBody >> "tagBody.txt"
+        
+    - name: Publish Artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: tag-body
+        path: tagBody.txt
+
+  PushNewTags:
+    name: 'Push New Tag For ${{ matrix.element }}'
+    runs-on: ubuntu-latest
+    needs: FetchNewVersionsAndElements
+    if: needs.FetchNewVersionsAndElements.outputs.parentIsHotfix == 'true' && needs.FetchNewVersionsAndElements.outputs.elementsChanged
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        element: ${{fromJson(needs.FetchNewVersionsAndElements.outputs.elementsChanged)}}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: 'Calculate new tag for ${{ matrix.element }}'
+      id: gitversion
+      shell: pwsh
+      run: |
+        $elementsTags = '${{ toJson(needs.FetchNewVersionsAndElements.outputs.elementsTags) }}' | ConvertFrom-Json | ConvertFrom-Json
+        $element = $elementsTags | Where-Object { $_.name -eq "${{ matrix.element }}" }
+        Write-Host ($element | ConvertTo-Json)
+        Write-Host "New version: $($element.tag)"
+        "newVersion=$($element.tag)" >> $env:GITHUB_OUTPUT
+    
+    - name: 'Create new tag for ${{ matrix.element }}'
+      shell: pwsh
+      run: |
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git config user.name "github-actions[bot]"
+        git tag -f ${{ steps.gitversion.outputs.newVersion }}
+        git push origin -f ${{ steps.gitversion.outputs.newVersion }}
+
+
+  CreateRelease:
+    name: 'Create Release'
+    runs-on: ubuntu-latest
+    needs: [FetchNewVersionsAndElements, PushNewTags]
+    if: always() && needs.FetchNewVersionsAndElements.result == 'success'
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Download Tag Body Artifact
+      uses: actions/download-artifact@v2
+      with:
+        name: tag-body
+        path: tagBody
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: 'v${{ needs.FetchNewVersionsAndElements.outputs.newReleaseVersion }}'
+        release_name: 'v${{ needs.FetchNewVersionsAndElements.outputs.newReleaseVersion }}'
+        draft: false
+        prerelease: false
+        body_path: tagBody/tagBody.txt
+
+    - name: Create Pull Request
+      if: ${{ needs.FetchNewVersionsAndElements.outputs.parentIsHotfix == 'true' }}
+      run: |
+        gh pr create \
+          --base ${{ github.event.repository.default_branch }} \
+          --head ${{ github.ref_name }} \
+          --title "Merging fixes from ${{ github.ref_name }} into ${{ github.event.repository.default_branch }}" \
+          --body "This PR merges the changes made to the release branch into ${{ github.event.repository.default_branch }} ."
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Output to Job Summary
+      id: output-element
+      shell: pwsh
+      run: |
+        Write-Host "New Release/Tag: v${{ needs.FetchNewVersionsAndElements.outputs.newReleaseVersion }}"
+        "# :rocket: :bookmark: New Release/Tag: v${{ needs.FetchNewVersionsAndElements.outputs.newReleaseVersion }} `r`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+        "## Release Branch: ${{ github.ref_name }} `r`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+        $tagBodyContent = Get-Content tagBody/tagBody.txt -Raw
+        Write-Host "Release Notes: `r`n $tagBodyContent"
+        "## Release Notes: `r`n $tagBodyContent" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append

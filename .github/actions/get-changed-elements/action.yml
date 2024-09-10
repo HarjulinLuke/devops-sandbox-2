@@ -1,0 +1,67 @@
+name: 'Fetches changed elements'
+description: 'Fetches the elements that have changed'
+
+inputs:
+  changed-files-config:
+    description: 'The path to the configuration file that defines the elements and their paths'
+    required: true
+    default: 'changed-files-config.json'
+
+outputs:
+  elementsChanged: 
+    description: 'The elements that have changed'
+    value: ${{ steps.elements-changed-output.outputs.elementsChanged }}
+
+runs:
+  using: 'composite'
+  steps:
+  - name: Create changed files src file
+    id: create-changed-files-src-file
+    shell: pwsh
+    run: |
+      $elements = (Get-Content ${{ inputs.changed-files-config }} | ConvertFrom-Json).elements
+      New-Item changed-files-config.yaml
+      foreach ($element in $elements) {
+        Add-Content -Path .\changed-files-config.yaml -Value "$($element.name):"
+        foreach ($path in $element.path) {
+          Add-Content -Path .\changed-files-config.yaml -Value "- $path"
+        }
+      }
+      $elementsCompressed = $elements | ConvertTo-Json -Compress
+      Write-Host "pwsh = $($elements.name)"
+      Write-Host "json = $elementsCompressed"
+      "elements=$elementsCompressed" >> $env:GITHUB_OUTPUT
+      
+  - name: Evaluate Changed Files
+    uses: tj-actions/changed-files@v44
+    id: changed-files
+    with:
+      dir_names: true
+      files_yaml_from_source_file: changed-files-config.yaml
+
+  - name: Output elements to run CI for
+    id: elements-changed-output
+    shell: pwsh
+    run: |
+      $elements = ('${{ steps.create-changed-files-src-file.outputs.elements }}' | ConvertFrom-Json)
+      Write-Host "all elements from config = $($elements.name)"
+      $allOutputs = ('${{ toJson(steps.changed-files.outputs) }}' | ConvertFrom-Json)
+      $elementsChanged = @()
+      foreach ($element in $elements) {
+        Write-Host "$($element.name) changed:" $allOutputs."$($element.name)_any_changed"
+        if ($allOutputs."$($element.name)_any_changed" -eq "true") {
+          $elementsChanged += $element.name
+        }
+      }
+      if ($elementsChanged.Count -eq 1) {
+        $elementsChangedJson = "[$($elementsChanged | ConvertTo-Json -Compress)]"
+      }
+      elseif ($elementsChanged.Count -eq 0) {
+        "## No files changed matched the paths defined in the configuration file. `r`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+      }
+      else {
+        $elementsChangedJson = $elementsChanged | ConvertTo-Json -Compress
+      }
+      Write-Host "pwsh = $($elementsChanged)"
+      Write-Host "json = $elementsChangedJson"
+      "elementsChanged=$elementsChangedJson" >> $env:GITHUB_OUTPUT

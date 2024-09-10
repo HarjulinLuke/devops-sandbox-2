@@ -1,0 +1,20 @@
+{
+  "version": "0.1.0",
+  "projects": {
+    "X": {
+      "name": "X",
+      "version": "0.1.0",
+      "path": "X/**"
+    },
+    "Y": {
+      "name": "Y",
+      "version": "0.1.0",
+      "path": "Y/**"
+    },
+    "Z": {
+      "name": "Z",
+      "version": "0.1.0",
+      "path": "Z/**"
+    }
+  }
+}
