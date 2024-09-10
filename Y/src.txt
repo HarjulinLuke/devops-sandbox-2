@@ -1,8 +1,1 @@
-# This is a placeholder code 8
 print("Hello, world!")
-# Bugfix
-# new feature G
-# bugfix D
-# Feature N
-# Feature P
-# bugfix E
