@@ -99,10 +99,13 @@ jobs:
           foreach ($path in $element.path) {
             Write-Output "  Path: $path"
             $commitHash = git log --before="$(git log -n 1 --pretty=format:'%cI')" -n 1 --pretty=format:"%H" -- $path
+            Write-Debug "Commit Hash: $commitHash"
             if ($commitHash -eq (git rev-parse HEAD)) {
+              Write-Debug "Head points to the commit hash"
               if (git tag --points-at $commitHash | Select-String "$($element.name)-v*") {
-                Write-Output "Head points to a tag for $($element.name)"
+                Write-Output "Head points to the commit hash and a tag for $($element.name)"
                 $latestCommit = $commitHash
+                Write-Debug "Latest Commit: $latestCommit"
                 break
               }
               else {
@@ -110,17 +113,22 @@ jobs:
                 # then the file was modified in the last commit and needs a tag
                 # So we need to get the second latest commit to get the latest tag
                 $latestCommit = (git log --before="$(git log -n 1 --pretty=format:'%cI')" -n 2 --pretty=format:"%H" -- $path)[1]
+                Write-Debug "Commit hash is the same as HEAD and a tag doesn't exist for the element"
+                Write-Debug "Latest Commit: $latestCommit"
               }              
             }
             else {
               # $childCommit = git log --all --pretty=format:'%H %P' | Select-String " $commitHash" | ForEach-Object { $_.ToString().Split(' ')[0] }
               if ($latestCommit) {
+                Write-Debug "Latest commit is not null. Checking if the latest commit is an ancestor of the commit hash"
                 git merge-base --is-ancestor $latestCommit $commitHash
                 if ($LASTEXITCODE -eq 0) {
+                  Write-Debug "Latest commit is an ancestor of the commit hash"
                   $latestCommit = $commitHash
                 }
               }
               else {
+              Write-Debug "Latest commit is null. Setting the latest commit to the commit hash"
                 $latestCommit = $commitHash
               }
             }
@@ -129,6 +137,7 @@ jobs:
           Write-Output "Tag: $tag"
           $tagWithoutPrefix = $tag -replace "$($element.name)-v",""
           if ($elementsChanged -contains $element.name -and '${{ steps.get-parent-branch.outputs.parentIsHotfix }}' -eq 'true') {
+            Write-Debug "Element: $($element.name) has changed and the parent branch is a hotfix branch"
             $major,$minor,$patch = ($tag -replace "$($element.name)-v","").Split('.')
             [int]$patch+=1
             $tag = "$($element.name)-v$major.$minor.$patch"
