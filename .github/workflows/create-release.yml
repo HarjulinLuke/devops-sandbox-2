@@ -91,68 +91,55 @@ jobs:
       run: |
         $tagBody = "### Contents: `r`n"
         $elements = Get-Content changed-files-config.json | ConvertFrom-Json | Select-Object -ExpandProperty elements
-        $elementsChanged = '${{ steps.elements-changed-output.outputs.elementsChanged }}' | ConvertFrom-Json
         $elementsTags = @()
         foreach ($element in $elements) {
           Write-Output "Element: $($element.name)"
-          $latestCommit = ""
-          foreach ($path in $element.path) {
-            Write-Output "  Path: $path"
-            $commitHash = git log --before="$(git log -n 1 --pretty=format:'%cI')" -n 1 --pretty=format:"%H" -- $path
-            Write-Output "Commit Hash: $commitHash"
-            if ($commitHash -eq (git rev-parse HEAD)) {
-              Write-Output "Head points to the commit hash"
-              if (git tag --points-at $commitHash | Select-String "$($element.name)-v*") {
-                Write-Output "Head points to the commit hash and a tag for $($element.name)"
-                $latestCommit = $commitHash
-                Write-Output "Latest Commit: $latestCommit"
-                break
+          $currentCommit = git rev-parse HEAD
+          $latestTag = ""
+          
+          if ($tag = git tag --points-at $currentCommit | Select-String "$($element.name)-v*") {
+            Write-Output "Head commit has a tag for $($element.name) - $tag"
+            $latestTag = $tag[0].Line
+          }
+          else {
+            $tags = @()
+            $parentCommits = git log --pretty=%P $currentCommit
+            Write-Output "Parent Commits: $parentCommits"
+            foreach ($parentCommit in $parentCommits.Split(" ")) {
+              $tag = git tag --points-at $parentCommit | Select-String -Pattern "^$($element.name)-v"
+              if ($tag) {
+                Write-Output "Parent Commit: $parentCommit - Tag: $($tag.Line)"
+                $tags += $tag.Line
               }
-              else {
-                # If the commit hash is the same as the HEAD and a tag doesn't exist for the element,
-                # then the file was modified in the last commit and needs a tag
-                # So we need to get the second latest commit to get the latest tag
-                $latestCommit = (git log --before="$(git log -n 1 --pretty=format:'%cI')" -n 2 --pretty=format:"%H" -- $path)[1]
-                Write-Output "Commit hash is the same as HEAD and a tag doesn't exist for the element"
-                Write-Output "Latest Commit: $latestCommit"
-              }              
             }
-            else {
-              # $childCommit = git log --all --pretty=format:'%H %P' | Select-String " $commitHash" | ForEach-Object { $_.ToString().Split(' ')[0] }
-              if ($latestCommit) {
-                Write-Output "Latest commit is not null. Checking if the latest commit is an ancestor of the commit hash"
-                git merge-base --is-ancestor $latestCommit $commitHash
-                if ($LASTEXITCODE -eq 0) {
-                  Write-Output "Latest commit is an ancestor of the commit hash"
-                  $latestCommit = $commitHash
-                }
-              }
-              else {
-              Write-Output "Latest commit is null. Setting the latest commit to the commit hash"
-                $latestCommit = $commitHash
+            $uniqueTags = $tags | Select-Object -Unique
+            foreach ($tag in $uniqueTags) {
+              # Get the latest tag
+              if ($latestTag -lt $tag) {
+                $latestTag = $tag
               }
             }
           }
-          $tag = (git tag --points-at $latestCommit | Select-String "$($element.name)-v*").Line
-          Write-Output "Tag: $tag"
-          $tagWithoutPrefix = $tag -replace "$($element.name)-v",""
+          $commit = git rev-list -n 1 $latestTag
+          Write-Output "Latest tag for element '$($element.name)'.`r`n Commit: $commit `r`n Tag: $latestTag"
+          $tagWithoutPrefix = $latestTag -replace "$($element.name)-v",""
+          $elementsChanged = '${{ steps.elements-changed-output.outputs.elementsChanged }}' | ConvertFrom-Json
           if ($elementsChanged -contains $element.name -and '${{ steps.get-parent-branch.outputs.parentIsHotfix }}' -eq 'true') {
             Write-Output "Element: $($element.name) has changed and the parent branch is a hotfix branch"
-            $major,$minor,$patch = ($tag -replace "$($element.name)-v","").Split('.')
+            $major,$minor,$patch = $tagWithoutPrefix.Split('.')
             [int]$patch+=1
             $tag = "$($element.name)-v$major.$minor.$patch"
             $tagWithoutPrefix = "$major.$minor.$patch"
-            $latestCommit = "${{ github.sha }}"
           }
           $elementsTags += @{
             name = $element.name
-            tag = $tag
+            tag = $latestTag
             tagWithoutPrefix = $tagWithoutPrefix
-            commit = $latestCommit
+            commit = $commit
           }
           $tagBody += "#### Element: $($element.name) `r`n"
-          $tagBody += " Latest Tag: $tag `r`n"
-          $tagBody += " Latest Commit: $latestCommit `r`n`r`n"
+          $tagBody += " Latest Tag: $latestTag `r`n"
+          $tagBody += " Latest Commit: $commit `r`n`r`n"
         }
         Write-Output ($elementsTags | ConvertTo-Json)
         "elementsTags=$($elementsTags | ConvertTo-Json -Compress)" >> $env:GITHUB_OUTPUT
