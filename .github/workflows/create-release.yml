@@ -128,7 +128,7 @@ jobs:
             Write-Output "Element: $($element.name) has changed and the parent branch is a hotfix branch"
             $major,$minor,$patch = $tagWithoutPrefix.Split('.')
             [int]$patch+=1
-            $tag = "$($element.name)-v$major.$minor.$patch"
+            $latestTag = "$($element.name)-v$major.$minor.$patch"
             $tagWithoutPrefix = "$major.$minor.$patch"
           }
           $elementsTags += @{
