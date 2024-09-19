@@ -34,10 +34,10 @@ jobs:
       id: get-last-commit
       shell: pwsh
       run: |
-        $prNumber = ${{ github.event.pull_request.number }}
-        $repoOwner = ${{ github.repository_owner }}
-        $repoName = ${{ github.event.repository.name }}
-        $githubToken = ${{ secrets.GITHUB_TOKEN }}
+        $prNumber = "${{ github.event.pull_request.number }}"
+        $repoOwner = "${{ github.repository_owner }}"
+        $repoName = "${{ github.event.repository.name }}"
+        $githubToken = "${{ secrets.GITHUB_TOKEN }}"
 
         # Fetch the list of commits in the PR
         $commits = Invoke-RestMethod -Uri "https://api.github.com/repos/$repoOwner/$repoName/pulls/$prNumber/commits" -Headers @{ Authorization = "token $githubToken" }
