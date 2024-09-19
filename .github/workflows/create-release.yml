@@ -106,8 +106,8 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: 'v${{ steps.elements-changed-output.outputs.newReleaseVersion }}'
-        release_name: 'v${{ steps.elements-changed-output.outputs.newReleaseVersion }}'
+        tag_name: 'v${{ steps.get-release-tag.outputs.newReleaseVersion }}'
+        release_name: 'v${{ steps.get-release-tag.outputs.newReleaseVersion }}'
         draft: false
         prerelease: false
         body_path: tagBody.txt
@@ -116,8 +116,8 @@ jobs:
       id: output-element
       shell: pwsh
       run: |
-        Write-Host "New Release/Tag: v${{ steps.elements-changed-output.outputs.newReleaseVersion }}"
-        "# :rocket: :bookmark: New Release/Tag: v${{ steps.elements-changed-output.outputs.newReleaseVersion }} `r`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+        Write-Host "New Release/Tag: v${{ steps.get-release-tag.outputs.newReleaseVersion }}"
+        "# :rocket: :bookmark: New Release/Tag: v${{ steps.get-release-tag.outputs.newReleaseVersion }} `r`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
         "## Release Branch: ${{ github.ref_name }} `r`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
         $tagBodyContent = Get-Content tagBody.txt -Raw
         Write-Host "Release Notes: `r`n $tagBodyContent"
