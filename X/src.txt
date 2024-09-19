@@ -1,4 +1,5 @@
 print("Hello, world!")
 # New feature A
 # New feature C
+# hotfix A
 # proper New feature C
