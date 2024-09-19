@@ -56,7 +56,7 @@ jobs:
         Write-Host "Remote branches:"
         git branch --list -r
 
-        if ($null -eq (git branch --list ${{ github.event.pull_request.head.ref }})) {
+        if ($null -eq (git branch --list -r ${{ github.event.pull_request.head.ref }})) {
           Write-Host "Creating branch ${{ github.event.pull_request.head.ref }}..."
           git checkout -b ${{ github.event.pull_request.head.ref }} ${{ steps.get-last-commit.outputs.lastCommitSha }}
           git push origin ${{ github.event.pull_request.head.ref }}
