@@ -56,7 +56,7 @@ jobs:
         Write-Host "Remote branches:"
         git branch --list -r
 
-        if ($null -eq (git branch --list ${{ github.event.pull_request.head.ref }})) {
+        if ($null -eq (git branch --list -r ${{ github.event.pull_request.head.ref }})) {
           Write-Host "Creating branch ${{ github.event.pull_request.head.ref }}..."
           git checkout -b ${{ github.event.pull_request.head.ref }} ${{ steps.get-last-commit.outputs.lastCommitSha }}
           git push origin ${{ github.event.pull_request.head.ref }}
@@ -137,9 +137,16 @@ jobs:
         git checkout -b $newRelease
         git push origin $newRelease
 
-    - name: Remove hotfix branch
+  RemovePrBranch:
+    name: 'Remove PR Branch'
+    runs-on: ubuntu-latest
+    needs: [GetChangedElements, PushNewTags, CreateRelease]
+    if: always() && needs.GetChangedElements.result == 'success'
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Remove PR branch
       shell: pwsh
       run: |
-        git push origin --delete ${{ github.event.pull_request.head.ref }}
-
-
+        git push origin --delete ${{ github.event.pull_request.head.ref }}  
